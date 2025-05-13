@@ -4,12 +4,26 @@ A Revolt.chat bot built with revolt.js.
 
 ## Features
 
-- Message responses when mentioned, replied to, or when 'nyx' is in the message
-- Channel activation/deactivation
-- User and channel blacklisting/whitelisting
-- Clear AI context with `!wack`
-- Simple permission system
-- MongoDB integration for data persistence
+- Natural conversation with users
+- Command handling with prefix
+- Channel-based AI context tracking
+- Support for mentions and replies
+- Random occasional responses
+- Channel blacklisting and whitelisting
+- User blacklisting
+- Image and audio support with AI analysis
+- Configurable logging for diagnostics
+
+## Image and Audio Support
+
+Nyx can now analyze images and audio files that are attached to messages. When sending a message with an image or audio attachment, make sure to either:
+- Mention the bot (@nyx)
+- Include "nyx" in your message
+- Reply to a previous bot message
+
+The bot will process the attachment and use AI to analyze:
+- Images: Describe what's in the image
+- Audio: Transcribe and respond to audio content
 
 ## How Nyx Responds
 

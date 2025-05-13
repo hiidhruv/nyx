@@ -63,26 +63,58 @@ let shapesClient = isOpenAiSdkAvailable ? 'openai' : 'axios';
  * @param {string} channelId - Channel ID
  * @param {string} prompt - User message
  * @param {string} userId - User ID for context tracking
+ * @param {Object} attachments - Optional attachments (image or audio URLs)
  * @returns {Promise<string>} AI response
  */
-async function generateResponse(channelId, prompt, userId) {
+async function generateResponse(channelId, prompt, userId, attachments = null) {
   try {
     if (!messageContexts.has(channelId)) {
       messageContexts.set(channelId, []);
     }
     const context = messageContexts.get(channelId);
+    
+    // Create content array for multimodal inputs
+    let userContent = prompt;
+    
+    // For OpenAI SDK format, convert to content array if there are attachments
+    if (attachments) {
+      console.log(`Processing attachments for channel ${channelId}:`, JSON.stringify(attachments));
+      
+      userContent = [{ type: "text", text: prompt || "Describe this" }];
+      
+      if (attachments.image) {
+        console.log(`Adding image URL to request: ${attachments.image}`);
+        userContent.push({
+          type: "image_url",
+          image_url: { url: attachments.image }
+        });
+      }
+      
+      if (attachments.audio) {
+        console.log(`Adding audio URL to request: ${attachments.audio}`);
+        userContent.push({
+          type: "audio_url",
+          audio_url: { url: attachments.audio }
+        });
+      }
+      
+      console.log(`Final multimodal content:`, JSON.stringify(userContent));
+    }
+    
     context.push({
       role: 'user',
-      content: prompt,
+      content: userContent,
       userId: userId
     });
+    
     while (context.length > 10) {
       context.shift();
     }
+    
     // Format IDs for better tracking in Shapes
     const formattedUserId = `revolt-user-${userId}`;
     const formattedChannelId = `revolt-channel-${channelId}`;
-    return await generateShapesResponse(formattedChannelId, prompt, formattedUserId, context);
+    return await generateShapesResponse(formattedChannelId, userContent, formattedUserId, context);
   } catch (error) {
     console.error('Error generating AI response:', error.message);
     if (error.response) {
@@ -95,7 +127,7 @@ async function generateResponse(channelId, prompt, userId) {
 /**
  * Generate response using Shapes Inc API
  * @param {string} channelId - Channel ID
- * @param {string} prompt - User message
+ * @param {string|Array} prompt - User message or content array
  * @param {string} userId - User ID
  * @param {Array} context - Message context
  * @returns {Promise<string>} AI response
@@ -104,20 +136,45 @@ async function generateShapesResponse(channelId, prompt, userId, context) {
   let aiMessage;
   if (shapesClient === 'openai' && isOpenAiSdkAvailable) {
     try {
+      // Format messages correctly for the OpenAI SDK
+      let messages;
+      
+      // Handle both string content and array content for multimodal
+      if (Array.isArray(prompt)) {
+        messages = [{ role: "user", content: prompt }];
+      } else {
+        messages = [{ role: "user", content: prompt }];
+      }
+      
+      if (isLoggingEnabled()) {
+        console.log('Sending request to Shapes API with:', 
+          JSON.stringify({
+            model: `shapesinc/${shapesUsername}`,
+            messages: messages
+          })
+        );
+      }
+      
       const response = await shapes.chat.completions.create({
         model: `shapesinc/${shapesUsername}`,
-        messages: [
-          { role: "user", content: prompt }
-        ],
+        messages: messages,
         extra_headers: {
           "X-User-Id": userId,
           "X-Channel-Id": channelId
         }
       });
+      
+      if (isLoggingEnabled()) {
+        console.log('Response from Shapes API:', JSON.stringify(response));
+      }
+      
       aiMessage = response.choices[0].message.content;
     } catch (error) {
       if (isLoggingEnabled()) {
         console.error('OpenAI SDK error:', error.message);
+        if (error.response) {
+          console.error('API Error Details:', JSON.stringify(error.response.data));
+        }
       }
       if (!error.message.includes('unauthorized') && !error.message.includes('invalid_api_key')) {
         aiMessage = await useAxiosImplementation(channelId, prompt, userId);
@@ -141,22 +198,45 @@ async function generateShapesResponse(channelId, prompt, userId, context) {
 /**
  * Helper function to use the Axios implementation for API calls
  * @param {string} channelId - Channel ID
- * @param {string} prompt - User message
+ * @param {string|Array} prompt - User message or content array
  * @param {string} userId - User ID
  * @returns {Promise<string>} AI response
  */
 async function useAxiosImplementation(channelId, prompt, userId) {
   try {
-    const response = await shapesApi.post('/chat/completions', {
-      content: prompt,
-      platform: "revolt",
-      platform_user_id: userId,
-      channel_id: channelId
-    });
-    return response.data.content;
+    // Create the request body in OpenAI format which Shapes API expects
+    const requestBody = {
+      model: `shapesinc/${shapesUsername}`,
+      messages: [{
+        role: "user",
+        content: prompt
+      }]
+    };
+    
+    // Add extra headers as query parameters since we're using axios directly
+    const headers = {
+      ...shapesApiConfig.headers,
+      "X-User-Id": userId,
+      "X-Channel-Id": channelId
+    };
+    
+    if (isLoggingEnabled()) {
+      console.log('Sending Axios request to Shapes API:', JSON.stringify(requestBody));
+    }
+    
+    const response = await shapesApi.post('/chat/completions', requestBody, { headers });
+    
+    if (isLoggingEnabled()) {
+      console.log('Response from Shapes API (Axios):', JSON.stringify(response.data));
+    }
+    
+    return response.data.choices[0].message.content;
   } catch (error) {
     if (isLoggingEnabled()) {
       console.error('Axios implementation error:', error.message);
+      if (error.response && error.response.data) {
+        console.error('API Error Details:', JSON.stringify(error.response.data));
+      }
     }
     throw error;
   }
